@@ -1,0 +1,121 @@
+;// Escriba el código de un servidor concurrente que espere (a) pedidos de conexión por 
+;// el port TCP 7887 en las ip 10.0.0.1 y 10.0.0.2 (eth0 y eth1 respectivamente), (b) 
+;// comandos por el named pipe /tmp/td3/srv-inpipe.
+
+;// El server debe: (a) inicializar una shared memory shm1 de 16 Kbytes para armar una 
+;// base de datos de Información de gestión, (b) Crear una shared memory shm2 de 4 Kbytes 
+;// para almacenar las ip válidas de la red, (c) crear un child process por cada pedido de 
+;// conexión.
+
+;// Cada child debe: (a) Esperar datos por el port 7887 de la interfaz respectiva, (b) una vez 
+;// recibidos validar la ip con la lista almacenada en shm2, y solo si está en esta lista 
+;// retransmitirlo por el mismo port de la otra interfaz. La dirección IP remota está dada por 
+;// los cuatro primeros bytes de la información recibida por la nueva conexión. (c) almacenar 
+;// en shm1 interfaz (eth0 o eth1), cantidad de bytes de la transacción, y terminar con 
+;// carácter fin de líne (\n).
+
+;// Cada vez que el server reciba el comando “status” (string ASCII) por /tmp/td3/srv-inpipe, 
+;// debe computar los datos de la shm1, e informar la cantidad de bytes transmitidos por cada 
+;// interfaz, por /tmp/td3/srv-outpipe. 
+
+#include <sys/socket.h>
+#include <sys/types.h>
+#define PUERTO 7887
+#define FIFO_NAME "/tmp/ts3/srv-inpipe"
+
+
+int main () {
+	
+	int s_eth0, s_eth1, s_cli;
+	struct sockaddr_in dir_eth0, dir_eth1, dir_cli;
+	int sizeaddr;
+
+	int shm1, shm2;
+	key_t key1, key2;
+	fd_set set_master, set_aux;
+
+	char *data_1, *data_2;
+
+	struct timeval tv;
+
+	tv.tv_sec = 10;
+	tv.tv_usec = 0;
+
+	mknod ("/tmp/td3/srv-inpipe", S_IFIFO | 0644, 0);
+
+	key1 = ftok (".", 'A');
+	key2 = ftok (".", 'B');
+
+	// Memoria compartida
+
+	shm1 = shmget (key1, 16*1024, 0600 | IPC_CREATE);
+	shm2 = shmget (key2,  4*1024, 0600 | IPC_CREATE);
+
+	data_1 = shmop (shm1, NULL, 0);
+	data_2 = shmop (shm2, NULL, 0);
+
+	// Creo los sockets
+
+	s_eth0 = socket (AF_INET, SOCK_STREAM, 0);
+	if ( s_eth0 == -1 ) {
+		perror ("socket");
+		exit (1);
+	}
+
+	s_eth1 = socket (AF_INET, SOCK_STREAM, 0);
+	if (s_eth1 == -1) {
+		perror ("socket");
+		exit (1);
+	}
+
+	// Dirección IP: 10.0.0.1
+	dir_eth0.sin_family = AF_INET;
+	dir_eth0.sin_port = htons (PUERTO);
+	dir_eth0.sin_addr.s_addr = inet_addr ("10.0.0.1");
+
+	// Dirección IP: 10.0.0.2
+	dir_eth1.sin_family = AF_INET;
+	dir_eth1.sin_port = htons (PUERTO);
+	dir_eth1.sin_addr.s_addr = inet_addr ("10.0.0.2");
+
+	bind (s_eth0, (struct sockaddr *)&dir_eth0, sizeoff (struct sockaddr)); 	// Asocio el descriptor con la dirección
+	bind (s_eth1, (struct sockaddr *)&dir_eth1, sizeoff (struct sockaddr));		// Asocio el descriptor con la dirección	
+
+	FD_ZERO (&set_master);
+	FD_SET (s_eth0, &set_master);
+	FD_SET (s_eth1, &set_master);
+
+	while (1) {
+		set_aux = set_master;
+		select (s_eth0+s_eth1, &set_aux, NULL, NULL, &tv);
+		if (ISSET (s_eth0, &set_aux)) {
+			if (!fork()) { 	// Proceso hijo
+				// Rutina atención de recepción IP 10.0.0.1
+				sizeaddr = sizeoff (struct sockaddr);
+				if ((s_cli = accept (s_eth0, (struct sockaddr *) &dir_cli, &sizeaddr)) == -1) {
+					perror ("accept");
+					exit (1);
+				}
+				if (valido (&dir_cli)
+
+			}
+		}
+		if (ISSET (s_eth1, &set_aux)) {
+			if (!fork()) { 	// Proceso hijo
+				// Rutina atención de recepción IP 10.0.0.2
+
+			}
+
+		}
+	}
+
+	
+
+
+}
+
+
+
+
+
+
