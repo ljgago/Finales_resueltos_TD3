@@ -1,0 +1,229 @@
+1) Suponga un sistema multitarea basado en arquitectura IA32 en configuración FLAT, con un
+kernel que se ejecuta en nivel 0 y tareas que se ejecutan en nivel 3:
+
+a) Explique como utilizaría el sistema de protección para evitar que una tarea de nivel 3
+no pueda sobrescribir memoria de otra tarea del mismo nivel.
+
+RESPUESTA: Se utilizaría uns sistema de Paginación 
+
+b) ¿Cual es el registro del procesador que debe cambiar con cada conmutación para que
+esta protección tenga efecto?.
+
+RESPUESTA: En cada conmutación debe cambiar el registro "TR" (Task Register) donde cada una de las
+tareas contiene su CR3, que es la dirección base del sistema de paginación.
+
+
+2) Explique con el mayor detalle posible (registros, esquemas, etc) un modo de paginación de
+memoria, que permita direccionar más memoria RAM, que lo permitido por la longitud propia
+de la dirección lineal.
+Nota: Puede optar por responder esta pregunta considerando tanto el modo de funcionamiento
+IA32 (32 bits) como el IA32e (64 bits)
+
+RESPUESTA: Funcionamiento de paginación con PAE:
+
+Seteando el bit 5 del CR4 (PAE), habilitamos el PAE (Phisical Adress Extension), donde el procesador
+extiende las direcciones de memoria física de 32 bits a 36 bits, o sea habilita 4 lineas adicionales
+en el procesador. Con esto, podemos direccionar 64 GB de memoria física.
+
+- Traduccion Lineal de Direcciones con PAE activado (páginas de 4 KB):
+
++=======================+===============+===========+=============+
+| Directory Pointer (2) | Directory (9) | Table (9) | Offset (12) |
++=======================+===============+===========+=============+
+
+2² (PDPTE) * 2⁹ (PDE) * 2⁹ (PTE) = 2²⁰ Páginas
+
+- Traduccion Lineal de Direcciones con PAE activado (páginas de 2 MB):
+
++=======================+===============+=========================+
+| Directory Pointer (2) | Directory (9) |      Offset (21)        |
++=======================+===============+=========================+
+
+2² (PDPTE) * 2⁹ (PDE) = 2048 Páginas
+
+El "Page Directory Pointer Table Entry", el "Page Directory Table Entry" y el "Page Table Entry" 
+con páginas de 4 KB;
+el "Page Directory Pointer Table Entry", el "Page Directory Table Entry"
+utilizan direcciones de 64 bits, en los cuales:
+
+    - Del bit 0-11 se especifican los atributos.
+    - Del bit 12-35 se especifuca la base.
+    - Del bit 36-63 es Reservado, se setea a 0. 
+
+
+3) Excepciones en IA32
+
+a) Basado en el comportamiento, indique y justifique cual de los 3 tipos de excepciones,
+es la que al retornar de su handler vuelve a ejecutar la instrucción que la causó.
+
+    - FAULTS: las excepciones tipo FAULTS pueden ser corregidas, no pierden la continuidad del programa
+    y vuelven a ejecutar la intrucción qur causo la excepción.
+
+    - TRAPS: las excepciones tipo TRAPS pueden ser corregidas, no pierden la continuidad del programa y
+    apuntan a la siguiente instrucción que causo la excepción.
+
+    - ABORTS: las excepciones tipo ABORTS no pueden reportar la ubicación específica que causo la excepción,
+    no se puede seguir la continuidad del programa, e usan generalmente para reportar errores graves.
+
+    La excepción tipo FAULTS.
+
+b) Desarrolle de manera libre, un handler de excepción para alguna que cumpla con el tipo
+indicado en a).
+
+ex13_handler_GP:
+ add esp, 0x4   ; Saco de la pila el error code, apunto ESP a EIP
+ iret
+
+
+4) Desarrollar el programa forwarder compatible con POSIX, que pueda ser invocado como
+se especifica en la línea de ejemplo, de manera que pueda redirigir el stdout de cualquier pro-
+grama que se invoque la izquierda del pipe hacia la IP y puerto TCP pasado como parámetro
+
+comando | forwarder <ip> <port>
+
+
+ejecutar por ejemplo:
+
+En un terminal:
+    ./servidor 
+o si tienen instalado netcat
+    nc -l 60000
+
+Y en otro terminal:
+    echo "Hola mundo ..." | ./cliente 127.0.0.1 60000
+
+/*
+    Con el comando "ls" solo veo el primer archivo de la lista, habría que ver bien
+    como es la estructura que envía el comando "ls".
+*/
+
+/* 
+    Función "forwarder"
+    Cliente (lo que pide el ejercicio)
+    cliente.c
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+
+#define SIZE_MSG 4096
+#define STD_INPUT 0
+#define STD_OUTPUT 1
+
+int main (int argc, char *argv[]) {
+
+    int sockfd;
+    struct sockaddr_in sockaddr;
+    char str[SIZE_MSG];
+
+
+    if ( argc != 3 ) {
+        printf ("Se necesita especificar el <ip> <port>\n");
+        return 0;
+    }
+
+    if ( (sockfd = socket (AF_INET, SOCK_STREAM, 0)) == -1 ) {
+        perror ("socket");
+        exit (1);
+    }
+
+    sockaddr.sin_family = AF_INET;
+    sockaddr.sin_port = htons (atoi (argv[2]));
+    sockaddr.sin_addr.s_addr = inet_addr (argv[1]);
+    
+    if ( connect (sockfd, (struct sockaddr *) &sockaddr, sizeof (struct sockaddr)) == -1 ) {
+        perror ("connect");
+        exit (1);
+    }
+    
+    fgets (str, SIZE_MSG, stdin);           // Recivo del pipe
+    //gets (str);
+    send (sockfd, str, sizeof(str), 0);     // Envío los datos al cliente ...
+    printf ("%s", str);                     // Implimo los datos que me envió el pipe de linux
+
+    return 0;
+}
+
+
+/* 
+    Función servidor (extra)
+    servidor.c
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+
+#define SIZE_MSG 4096
+#define STD_INPUT 0
+#define STD_OUTPUT 1
+#define SERVER_PORT 60000
+#define BACKLOG 10          // Cuantas conecciones esperan en la cola
+
+int main (int argc, char *argv[]) {
+
+    int sockfd, clientfd, addrsize;
+    struct sockaddr_in sockaddr, clientaddr;
+    char str[SIZE_MSG];
+    fd_set readfds, backupfds;
+    struct timeval tv;
+
+
+    if ( (sockfd = socket (AF_INET, SOCK_STREAM, 0)) == -1 ) {
+        perror ("socket");
+        exit (1);
+    }
+
+    sockaddr.sin_family = AF_INET;
+    sockaddr.sin_port = htons (SERVER_PORT);     // Puerto de escucha del server
+    sockaddr.sin_addr.s_addr = INADDR_ANY;       // Utilizo mi dirección Local
+
+    if ( bind (sockfd, (struct sockaddr*) &sockaddr, sizeof (struct sockaddr)) == -1 ) {
+        perror ("bind");
+        exit (1);
+    }
+
+    if ( listen (sockfd, BACKLOG) == -1 ) {
+        perror ("listen");
+        exit (1);
+    }
+
+    FD_ZERO ( &backupfds );
+    FD_SET ( sockfd, &backupfds );
+    tv.tv_sec = 3600;               // 1 hora de espera para conexiones entrantes (no hace falta)
+    tv.tv_usec = 0;
+
+
+    while (1) {
+
+        readfds = backupfds;
+        if ( select ( sockfd+1, &readfds, NULL, NULL, &tv ) == -1 ) {
+            perror ("select");
+            exit (1);
+        }
+
+        if ( FD_ISSET ( sockfd, &readfds) ) {   // devuelve "true" si esta el file descriptor
+            addrsize = sizeof (struct sockaddr_in);
+            if ( (clientfd = accept (sockfd, (struct sockaddr *) &clientaddr, &addrsize)) == -1 ) {
+                perror ("accept");
+                exit (1);
+            }
+            
+            recv ( clientfd, str, SIZE_MSG, 0);
+            printf ("Recibido: %s", str);
+        }
+    }
+
+    return 0;
+}
+
+
